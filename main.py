@@ -1,5 +1,5 @@
 import os
-import funcoes as fc  # Importa o 'funcoes.py'
+import funcoes as fc
 import time
 
 # --- Tabela de Cores (Códigos ANSI) ---
@@ -25,7 +25,7 @@ while True:
     print(f"{BOLD}{AZUL}========================================={RESET}")
     print(f"{BOLD}{AZUL}      BEM-VINDO À PONTE ACADÊMICA      {RESET}")
     print(f"{BOLD}{AZUL}========================================={RESET}")
-    time.sleep(0.5) # Pequena pausa
+    time.sleep(0.5)
 
     print(f"{CIANO}1 - Login{RESET}")
     print(f"{CIANO}2 - Cadastrar{RESET}")
@@ -38,17 +38,12 @@ while True:
     limpar_tela()
 
     if opt == "1":
-        # Chama a função de login (que agora existe)
         fc.realizar_login() 
-        
     elif opt == "2":
-        # Chama a função de cadastro (que já existe)
         fc.realizar_cadastro() 
-        
     elif opt == "0":
         print(f"Saindo do sistema... {EMOJI_SUCESSO}")
         break
-    
     else:
         print(f"{VERMELHO}Opção inválida! {EMOJI_ALERTA}{RESET}")
         input(f"{AZUL}Digite enter para voltar ao menu{RESET}")
