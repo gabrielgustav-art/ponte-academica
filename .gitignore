@@ -1,0 +1,12 @@
+# Banco de dados
+tabela.db
+
+# Cache do Python
+__pycache__/
+
+# Ambiente Virtual
+.venv/
+
+# Pasta do VSCode
+.idea/
+.vscode/
