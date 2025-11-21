@@ -1,379 +1,360 @@
 import sqlite3
-#from datetime import datetime
+import os
+from datetime import datetime
 
-# --- Funções Auxiliares de Validação (Banco) ---
+NOME_BANCO = "tabela.db"
 
-def checar_se_existe_db(tabela, coluna, valor):
-    """Verifica se um valor já existe em uma tabela. Retorna True se existir."""
-    conn = None
-    existe = False
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = f"SELECT 1 FROM {tabela} WHERE {coluna} = ?"
-        cursor.execute(sql, (valor,))
-        if cursor.fetchone(): 
-            existe = True
-    except sqlite3.Error as e:
-        print(f"Erro ao checar dados no DB: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return existe
+def get_conn():
+    conn = sqlite3.connect(NOME_BANCO)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def checar_candidatura_duplicada_db(id_projeto, rgm_aluno):
-    """Verifica se este aluno já se candidatou a este projeto."""
-    conn = None
-    existe = False
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = "SELECT 1 FROM Candidatura WHERE ID_PROJETO = ? AND RGM_ALUNO = ?"
-        cursor.execute(sql, (id_projeto, rgm_aluno))
-        if cursor.fetchone(): 
-            existe = True
-    except sqlite3.Error as e:
-        print(f"Erro ao checar candidatura no DB: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return existe
+def init_db():
+    """Cria as tabelas caso o banco ainda não exista."""
+    first_time = not os.path.exists(NOME_BANCO)
+    conn = get_conn()
+    cur = conn.cursor()
 
-# --- (A) Funções de CADASTRO (Banco) ---
+    # Cria tabelas (IF NOT EXISTS) — não apaga DB existente
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS Aluno (
+        RGM_ALUNO     INTEGER PRIMARY KEY,
+        NOME_ALUNO    TEXT NOT NULL,
+        SENHA         TEXT NOT NULL,
+        DATA_CADASTRO TEXT NOT NULL
+    );
+    """)
 
-def cadastrar_aluno_db(rgm, nome, senha, data):
-    """(C) Insere um novo aluno no banco."""
-    conn = None 
-    try:
-        conn = sqlite3.connect('tabela.db') 
-        cursor = conn.cursor()
-        sql_insert = "INSERT INTO Aluno (RGM_ALUNO, NOME_ALUNO, SENHA, DATA_CADASTRO) VALUES (?, ?, ?, ?)"
-        cursor.execute(sql_insert, (rgm, nome, senha, data)) 
-        conn.commit() 
-        return True, None
-    except sqlite3.Error as e: 
-        return False, str(e)
-    finally:
-        if conn:
-            conn.close() 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS Organizacao (
+        CNPJ_ORG      INTEGER PRIMARY KEY,
+        NOME_ORG      TEXT NOT NULL,
+        SENHA         TEXT NOT NULL,
+        DATA_CADASTRO TEXT NOT NULL
+    );
+    """)
 
-def cadastrar_organizacao_db(cnpj, nome, senha, data):
-    """(C) Insere uma nova organização no banco."""
-    conn = None 
-    try:
-        conn = sqlite3.connect('tabela.db') 
-        cursor = conn.cursor()
-        sql_insert = "INSERT INTO Organizacao (CNPJ_ORG, NOME_ORG, SENHA, DATA_CADASTRO) VALUES (?, ?, ?, ?)"
-        cursor.execute(sql_insert, (cnpj, nome, senha, data)) 
-        conn.commit() 
-        return True, None
-    except sqlite3.Error as e: 
-        return False, str(e)
-    finally:
-        if conn:
-            conn.close() 
+    # Agora com ULTIMA_ATUALIZACAO
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS Projeto (
+        ID_PROJETO          INTEGER PRIMARY KEY AUTOINCREMENT,
+        TITULO              TEXT NOT NULL,
+        DESCRICAO           TEXT NOT NULL,
+        CNPJ_ORG            INTEGER NOT NULL,
+        DATA_CRIACAO        TEXT NOT NULL,
+        ULTIMA_ATUALIZACAO  TEXT NOT NULL,
+        FOREIGN KEY(CNPJ_ORG) REFERENCES Organizacao(CNPJ_ORG)
+    );
+    """)
 
-def cadastrar_projeto_db(titulo, descricao, cnpj_org, data):
-    """(C) Insere um novo projeto no banco."""
-    conn = None 
-    try:
-        conn = sqlite3.connect('tabela.db') 
-        cursor = conn.cursor()
-        sql_insert = "INSERT INTO Projeto (TITULO, DESCRICAO, CNPJ_ORG, DATA_CRIACAO) VALUES (?, ?, ?, ?)"
-        cursor.execute(sql_insert, (titulo, descricao, cnpj_org, data))
-        conn.commit() 
-        return True, None
-    except sqlite3.Error as e: 
-        return False, str(e)
-    finally:
-        if conn:
-            conn.close() 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS Candidatura (
+        ID_CANDIDATURA     INTEGER PRIMARY KEY AUTOINCREMENT,
+        ID_PROJETO         INTEGER NOT NULL,
+        RGM_ALUNO          INTEGER NOT NULL,
+        DATA_CANDIDATURA   TEXT NOT NULL,
+        FOREIGN KEY(ID_PROJETO) REFERENCES Projeto(ID_PROJETO),
+        FOREIGN KEY(RGM_ALUNO) REFERENCES Aluno(RGM_ALUNO),
+        UNIQUE(ID_PROJETO, RGM_ALUNO)
+    );
+    """)
 
-def candidatar_a_projeto_db(id_projeto, rgm_aluno, data):
-    """(C) Insere uma nova candidatura no banco."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_insert = "INSERT INTO Candidatura (ID_PROJETO, RGM_ALUNO, DATA_CANDIDATURA) VALUES (?, ?, ?)"
-        cursor.execute(sql_insert, (id_projeto, rgm_aluno, data))
-        conn.commit()
-        return True, None
-    except sqlite3.IntegrityError:
-        return False, "ID de projeto não encontrado ou candidatura duplicada."
-    except sqlite3.Error as e:
-        return False, str(e)
-    finally:
-        if conn:
-            conn.close()
+    # Tabela para mensagens do chat interno
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS Mensagem (
+        ID_MENSAGEM     INTEGER PRIMARY KEY AUTOINCREMENT,
+        ID_PROJETO      INTEGER NOT NULL,
+        REMETENTE       TEXT NOT NULL,  -- 'aluno' ou 'org'
+        ID_REMETENTE    TEXT NOT NULL,  -- RGM ou CNPJ (string)
+        MENSAGEM        TEXT NOT NULL,
+        DATA_ENVIO      TEXT NOT NULL,
+        FOREIGN KEY(ID_PROJETO) REFERENCES Projeto(ID_PROJETO)
+    );
+    """)
 
-# --- (B) Funções de LOGIN (Banco) ---
+    conn.commit()
+    conn.close()
+    if first_time:
+        print("Banco criado e tabelas inicializadas.")
+    else:
+        print("Banco encontrado — verificação de tabelas concluída.")
+
+# --------------------------
+# Funções de acesso usadas pelo app
+# --------------------------
 
 def login_aluno_db(rgm, senha):
-    """Verifica RGM e Senha no banco. Retorna o nome do aluno ou None."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_select = "SELECT NOME_ALUNO FROM Aluno WHERE RGM_ALUNO = ? AND SENHA = ?"
-        cursor.execute(sql_select, (rgm, senha))
-        resultado = cursor.fetchone() 
-        if resultado:
-            return resultado[0] 
-        else:
-            return None 
-    except sqlite3.Error as e:
-        print(f"Erro ao fazer login (Aluno DB): {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT NOME_ALUNO FROM Aluno WHERE RGM_ALUNO=? AND SENHA=?", (rgm, senha))
+    row = cur.fetchone()
+    conn.close()
+    return row["NOME_ALUNO"] if row else None
 
 def login_organizacao_db(cnpj, senha):
-    """Verifica CNPJ e Senha no banco. Retorna o nome da organização ou None."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_select = "SELECT NOME_ORG FROM Organizacao WHERE CNPJ_ORG = ? AND SENHA = ?"
-        cursor.execute(sql_select, (cnpj, senha))
-        resultado = cursor.fetchone() 
-        if resultado:
-            return resultado[0] 
-        else:
-            return None 
-    except sqlite3.Error as e:
-        print(f"Erro ao fazer login (Org DB): {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT NOME_ORG FROM Organizacao WHERE CNPJ_ORG=? AND SENHA=?", (cnpj, senha))
+    row = cur.fetchone()
+    conn.close()
+    return row["NOME_ORG"] if row else None
 
-# --- (D/E) Funções de LEITURA (Banco) ---
+def cadastrar_aluno_db(rgm, nome, senha, data_cadastro):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO Aluno (RGM_ALUNO, NOME_ALUNO, SENHA, DATA_CADASTRO) VALUES (?, ?, ?, ?)",
+                    (rgm, nome, senha, data_cadastro))
+        conn.commit()
+        conn.close()
+        return True, None
+    except sqlite3.IntegrityError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
+def cadastrar_organizacao_db(cnpj, nome, senha, data_cadastro):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO Organizacao (CNPJ_ORG, NOME_ORG, SENHA, DATA_CADASTRO) VALUES (?, ?, ?, ?)",
+                    (cnpj, nome, senha, data_cadastro))
+        conn.commit()
+        conn.close()
+        return True, None
+    except sqlite3.IntegrityError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
+def cadastrar_projeto_db(titulo, descricao, cnpj_org, data_criacao, ultima_atualizacao):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO Projeto (TITULO, DESCRICAO, CNPJ_ORG, DATA_CRIACAO, ULTIMA_ATUALIZACAO)
+            VALUES (?, ?, ?, ?, ?)
+        """, (titulo, descricao, cnpj_org, data_criacao, ultima_atualizacao))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 def listar_projetos_org_db(cnpj_org):
-    """(R) Busca a lista de projetos de uma organização."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = """
-            SELECT P.ID_PROJETO, P.TITULO, 
-                   (SELECT COUNT(*) FROM Candidatura C WHERE C.ID_PROJETO = P.ID_PROJETO) AS Candidatos,
-                   P.DATA_CRIACAO
-            FROM Projeto AS P
-            WHERE P.CNPJ_ORG = ?
-        """
-        cursor.execute(sql, (cnpj_org,))
-        return cursor.fetchall(), None
-    except sqlite3.Error as e:
-        return [], str(e)
-    finally:
-        if conn:
-            conn.close()
-
-def listar_candidatos_db(id_projeto):
-    """(R) Busca a lista de candidatos de um projeto."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_candidatos = """
-            SELECT A.RGM_ALUNO, A.NOME_ALUNO, C.DATA_CANDIDATURA
-            FROM Candidatura AS C
-            JOIN Aluno AS A ON C.RGM_ALUNO = A.RGM_ALUNO
-            WHERE C.ID_PROJETO = ?
-        """
-        cursor.execute(sql_candidatos, (id_projeto,))
-        return cursor.fetchall(), None
-    except sqlite3.Error as e:
-        return [], str(e)
-    finally:
-        if conn:
-            conn.close()
-
-def get_projeto_detalhes_db(id_projeto, cnpj_org):
-    """(R) Busca os detalhes de um projeto específico."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_projeto = "SELECT TITULO, DESCRICAO, DATA_CRIACAO FROM Projeto WHERE ID_PROJETO = ? AND CNPJ_ORG = ?"
-        cursor.execute(sql_projeto, (id_projeto, cnpj_org))
-        return cursor.fetchone(), None
-    except sqlite3.Error as e:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT ID_PROJETO, TITULO, (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) AS CANDIDATOS, DATA_CRIACAO FROM Projeto WHERE CNPJ_ORG=? ORDER BY DATA_CRIACAO DESC", (cnpj_org,))
+        rows = cur.fetchall()
+        resultados = [(r["ID_PROJETO"], r["TITULO"], r["CANDIDATOS"], r["DATA_CRIACAO"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
         return None, str(e)
-    finally:
-        if conn:
-            conn.close()
-
-def get_projeto_detalhes_publico_db(id_projeto):
-    """(R) Busca os detalhes públicos de um projeto (para alunos)."""
-    conn = None
-    try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = """
-            SELECT P.TITULO, P.DESCRICAO, O.NOME_ORG, P.DATA_CRIACAO
-            FROM Projeto AS P
-            JOIN Organizacao AS O ON P.CNPJ_ORG = O.CNPJ_ORG
-            WHERE P.ID_PROJETO = ?
-        """
-        cursor.execute(sql, (id_projeto,))
-        return cursor.fetchone(), None
-    except sqlite3.Error as e:
-        return None, str(e)
-    finally:
-        if conn:
-            conn.close()
 
 def listar_projetos_disponiveis_db(rgm_aluno):
-    """(R) Busca projetos que o aluno ainda não se candidatou."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = """
-            SELECT P.ID_PROJETO, P.TITULO, O.NOME_ORG AS ORGANIZACAO, P.DATA_CRIACAO
-            FROM Projeto AS P
-            JOIN Organizacao AS O ON P.CNPJ_ORG = O.CNPJ_ORG
-            WHERE NOT EXISTS (
-                SELECT 1 FROM Candidatura C 
-                WHERE C.ID_PROJETO = P.ID_PROJETO AND C.RGM_ALUNO = ?
-            )
-        """
-        cursor.execute(sql, (rgm_aluno,))
-        return cursor.fetchall(), None
-    except sqlite3.Error as e:
-        return [], str(e)
-    finally:
-        if conn:
-            conn.close()
+        conn = get_conn()
+        cur = conn.cursor()
+        # lista todos os projetos nos quais o aluno ainda não se candidatou
+        cur.execute("""
+            SELECT p.ID_PROJETO, p.TITULO, o.NOME_ORG AS ORGANIZACAO, p.DATA_CRIACAO
+            FROM Projeto p
+            JOIN Organizacao o ON p.CNPJ_ORG = o.CNPJ_ORG
+            WHERE p.ID_PROJETO NOT IN (SELECT ID_PROJETO FROM Candidatura WHERE RGM_ALUNO=?)
+            ORDER BY p.DATA_CRIACAO DESC
+        """, (rgm_aluno,))
+        rows = cur.fetchall()
+        resultados = [(r["ID_PROJETO"], r["TITULO"], r["ORGANIZACAO"], r["DATA_CRIACAO"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
+        return None, str(e)
+
+def get_projeto_detalhes_db(id_projeto, cnpj_org):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT TITULO, DESCRICAO, DATA_CRIACAO, ULTIMA_ATUALIZACAO FROM Projeto WHERE ID_PROJETO=? AND CNPJ_ORG=?", (id_projeto, cnpj_org))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None, None
+        return (row["TITULO"], row["DESCRICAO"], row["DATA_CRIACAO"], row["ULTIMA_ATUALIZACAO"]), None
+    except Exception as e:
+        return None, str(e)
+
+def get_projeto_detalhes_publico_db(id_projeto):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.TITULO, p.DESCRICAO, o.NOME_ORG, p.DATA_CRIACAO, p.ULTIMA_ATUALIZACAO
+            FROM Projeto p
+            JOIN Organizacao o ON p.CNPJ_ORG=o.CNPJ_ORG
+            WHERE p.ID_PROJETO=?
+        """, (id_projeto,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None, None
+        return (row["TITULO"], row["DESCRICAO"], row["NOME_ORG"], row["DATA_CRIACAO"], row["ULTIMA_ATUALIZACAO"]), None
+    except Exception as e:
+        return None, str(e)
+
+def listar_candidatos_db(id_projeto):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.RGM_ALUNO, a.NOME_ALUNO, c.DATA_CANDIDATURA
+            FROM Candidatura c
+            JOIN Aluno a ON c.RGM_ALUNO=a.RGM_ALUNO
+            WHERE c.ID_PROJETO=?
+        """, (id_projeto,))
+        rows = cur.fetchall()
+        resultados = [(r["RGM_ALUNO"], r["NOME_ALUNO"], r["DATA_CANDIDATURA"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
+        return None, str(e)
+
+def candidatar_a_projeto_db(id_projeto, rgm_aluno, data_candidatura):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO Candidatura (ID_PROJETO, RGM_ALUNO, DATA_CANDIDATURA) VALUES (?, ?, ?)",
+                    (id_projeto, rgm_aluno, data_candidatura))
+        conn.commit()
+        conn.close()
+        return True, None
+    except sqlite3.IntegrityError as e:
+        return False, "Já existe candidatura para este projeto." if "UNIQUE" in str(e).upper() else str(e)
+    except Exception as e:
+        return False, str(e)
 
 def ver_minhas_candidaturas_db(rgm_aluno):
-    """(R) Busca os projetos aos quais o aluno se candidatou."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql = """
-            SELECT P.ID_PROJETO, P.TITULO, O.NOME_ORG AS ORGANIZACAO, C.DATA_CANDIDATURA
-            FROM Projeto AS P
-            JOIN Organizacao AS O ON P.CNPJ_ORG = O.CNPJ_ORG
-            JOIN Candidatura AS C ON P.ID_PROJETO = C.ID_PROJETO
-            WHERE C.RGM_ALUNO = ?
-        """
-        cursor.execute(sql, (rgm_aluno,))
-        return cursor.fetchall(), None
-    except sqlite3.Error as e:
-        return [], str(e)
-    finally:
-        if conn:
-            conn.close()
-
-# --- (F) Funções de ATUALIZAÇÃO e EXCLUSÃO (Banco) ---
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.ID_PROJETO, p.TITULO, o.NOME_ORG, c.DATA_CANDIDATURA
+            FROM Candidatura c
+            JOIN Projeto p ON c.ID_PROJETO = p.ID_PROJETO
+            JOIN Organizacao o ON p.CNPJ_ORG = o.CNPJ_ORG
+            WHERE c.RGM_ALUNO=?
+            ORDER BY c.DATA_CANDIDATURA DESC
+        """, (rgm_aluno,))
+        rows = cur.fetchall()
+        resultados = [(r["ID_PROJETO"], r["TITULO"], r["NOME_ORG"], r["DATA_CANDIDATURA"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
+        return None, str(e)
 
 def atualizar_projeto_db(novo_titulo, nova_descricao, id_projeto, cnpj_org):
-    """(U) Atualiza um projeto no banco."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_update = """
-            UPDATE Projeto 
-            SET 
-                TITULO = CASE WHEN ? = '' THEN TITULO ELSE ? END,
-                DESCRICAO = CASE WHEN ? = '' THEN DESCRICAO ELSE ? END
-            WHERE ID_PROJETO = ? AND CNPJ_ORG = ? 
-        """
-        cursor.execute(sql_update, (novo_titulo, novo_titulo, nova_descricao, nova_descricao, id_projeto, cnpj_org))
-        
-        if cursor.rowcount == 0:
-            return False, "Nenhum projeto encontrado com este ID ou permissão negada."
+        conn = get_conn()
+        cur = conn.cursor()
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # se titulo/desc vierem vazios, mantemos os atuais
+        if not novo_titulo and not nova_descricao:
+            return False, "Nenhum campo para atualizar."
+        if novo_titulo and nova_descricao:
+            cur.execute("UPDATE Projeto SET TITULO=?, DESCRICAO=?, ULTIMA_ATUALIZACAO=? WHERE ID_PROJETO=? AND CNPJ_ORG=?",
+                        (novo_titulo, nova_descricao, agora, id_projeto, cnpj_org))
+        elif novo_titulo:
+            cur.execute("UPDATE Projeto SET TITULO=?, ULTIMA_ATUALIZACAO=? WHERE ID_PROJETO=? AND CNPJ_ORG=?",
+                        (novo_titulo, agora, id_projeto, cnpj_org))
         else:
-            conn.commit()
-            return True, None
-    except sqlite3.Error as e:
+            cur.execute("UPDATE Projeto SET DESCRICAO=?, ULTIMA_ATUALIZACAO=? WHERE ID_PROJETO=? AND CNPJ_ORG=?",
+                        (nova_descricao, agora, id_projeto, cnpj_org))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
         return False, str(e)
-    finally:
-        if conn:
-            conn.close()
 
 def excluir_projeto_db(id_projeto, cnpj_org):
-    """(D) Exclui um projeto e suas candidaturas."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        conn.execute("PRAGMA foreign_keys = ON")
-        cursor = conn.cursor()
-        
-        sql_delete_candidaturas = "DELETE FROM Candidatura WHERE ID_PROJETO = ?"
-        cursor.execute(sql_delete_candidaturas, (id_projeto,))
-
-        sql_delete_projeto = "DELETE FROM Projeto WHERE ID_PROJETO = ? AND CNPJ_ORG = ?"
-        cursor.execute(sql_delete_projeto, (id_projeto, cnpj_org))
-        
-        if cursor.rowcount == 0:
-            return False, "Nenhum projeto encontrado com este ID ou permissão negada."
-        else:
-            conn.commit()
-            return True, None
-    except sqlite3.Error as e:
+        conn = get_conn()
+        cur = conn.cursor()
+        # exclui candidaturas e mensagens relacionadas antes de excluir projeto
+        cur.execute("DELETE FROM Candidatura WHERE ID_PROJETO=?", (id_projeto,))
+        cur.execute("DELETE FROM Mensagem WHERE ID_PROJETO=?", (id_projeto,))
+        cur.execute("DELETE FROM Projeto WHERE ID_PROJETO=? AND CNPJ_ORG=?", (id_projeto, cnpj_org))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
         return False, str(e)
-    finally:
-        if conn:
-            conn.close()
+
+def relatorio_pesquisa_db(cnpj_org, filtro, termo):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if filtro == '1':  # título
+            cur.execute("SELECT ID_PROJETO, TITULO, (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) AS CANDIDATOS, DATA_CRIACAO FROM Projeto WHERE CNPJ_ORG=? AND TITULO LIKE ? ORDER BY DATA_CRIACAO DESC", (cnpj_org, f"%{termo}%"))
+        elif filtro == '2':  # Em Andamento — por enquanto, consideramos projeto com candidatos
+            cur.execute("SELECT ID_PROJETO, TITULO, (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) AS CANDIDATOS, DATA_CRIACAO FROM Projeto WHERE CNPJ_ORG=? AND (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) > 0 ORDER BY DATA_CRIACAO DESC", (cnpj_org,))
+        elif filtro == '3':  # Disponível — sem candidatos
+            cur.execute("SELECT ID_PROJETO, TITULO, (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) AS CANDIDATOS, DATA_CRIACAO FROM Projeto WHERE CNPJ_ORG=? AND (SELECT COUNT(*) FROM Candidatura WHERE ID_PROJETO=Projeto.ID_PROJETO) = 0 ORDER BY DATA_CRIACAO DESC", (cnpj_org,))
+        else:
+            return None, "Filtro inválido."
+        rows = cur.fetchall()
+        resultados = [(r["ID_PROJETO"], r["TITULO"], r["CANDIDATOS"], r["DATA_CRIACAO"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
+        return None, str(e)
 
 def remover_candidatura_db(id_projeto, rgm_aluno):
-    """(D) Remove uma candidatura específica do banco."""
-    conn = None
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        sql_delete = "DELETE FROM Candidatura WHERE ID_PROJETO = ? AND RGM_ALUNO = ?"
-        cursor.execute(sql_delete, (id_projeto, rgm_aluno))
-        
-        if cursor.rowcount == 0:
-            return False, "Candidatura não encontrada ou ID de projeto inválido."
-        else:
-            conn.commit()
-            return True, None
-    except sqlite3.Error as e:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM Candidatura WHERE ID_PROJETO=? AND RGM_ALUNO=?", (id_projeto, rgm_aluno))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
         return False, str(e)
-    finally:
-        if conn:
-            conn.close()
 
-# --- (G) Funções de RELATÓRIO (Banco) ---
+# --------------------------
+# Mensagens (chat interno)
+# --------------------------
 
-def relatorio_pesquisa_db(cnpj_org, filtro, termo=None):
-    """(R) Busca o relatório filtrado no banco."""
-    conn = None
+def enviar_mensagem_db(id_projeto, remetente, id_remetente, mensagem, data_envio):
     try:
-        conn = sqlite3.connect('tabela.db')
-        cursor = conn.cursor()
-        
-        sql_base = """
-            SELECT P.ID_PROJETO, P.TITULO, 
-                   (SELECT COUNT(*) FROM Candidatura C WHERE C.ID_PROJETO = P.ID_PROJETO) AS Candidatos,
-                   P.DATA_CRIACAO
-            FROM Projeto AS P
-            WHERE P.CNPJ_ORG = ?
-        """
-        params = [cnpj_org]
-        
-        if filtro == '1': # Título
-            sql_base += " AND P.TITULO LIKE ?"
-            params.append(f"%{termo}%")
-        elif filtro == '2': # Em Andamento
-            sql_base += " AND (SELECT COUNT(*) FROM Candidatura C WHERE C.ID_PROJETO = P.ID_PROJETO) > 0"
-        elif filtro == '3': # Disponível
-            sql_base += " AND (SELECT COUNT(*) FROM Candidatura C WHERE C.ID_PROJETO = P.ID_PROJETO) = 0"
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO Mensagem (ID_PROJETO, REMETENTE, ID_REMETENTE, MENSAGEM, DATA_ENVIO) VALUES (?, ?, ?, ?, ?)",
+                    (id_projeto, remetente, str(id_remetente), mensagem, data_envio))
+        conn.commit()
+        conn.close()
+        # atualiza ULTIMA_ATUALIZACAO do projeto
+        try:
+            cur = get_conn().cursor()
+            cur.execute("UPDATE Projeto SET ULTIMA_ATUALIZACAO=? WHERE ID_PROJETO=?", (data_envio, id_projeto))
+            cur.connection.commit()
+            cur.connection.close()
+        except:
+            pass
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
-        cursor.execute(sql_base, tuple(params))
-        return cursor.fetchall(), None
-    except sqlite3.Error as e:
-        return [], str(e)
-    finally:
-        if conn:
-            conn.close()
+def listar_mensagens_db(id_projeto):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT REMETENTE, ID_REMETENTE, MENSAGEM, DATA_ENVIO FROM Mensagem WHERE ID_PROJETO=? ORDER BY DATA_ENVIO ASC", (id_projeto,))
+        rows = cur.fetchall()
+        resultados = [(r["REMETENTE"], r["ID_REMETENTE"], r["MENSAGEM"], r["DATA_ENVIO"]) for r in rows]
+        conn.close()
+        return resultados, None
+    except Exception as e:
+        return None, str(e)
+
+# Inicializa DB ao importar
+init_db()
